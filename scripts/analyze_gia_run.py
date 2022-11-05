@@ -4,6 +4,9 @@ import os, sys
 import numpy as np
 import pandas as pd
 from scipy.interpolate import RectBivariateSpline
+from intersect import intersection
+
+import matplotlib.pyplot as plt
 
 os.environ['PROJ_LIB'] = '/home/skachuck/anaconda2/share/proj/'
 
@@ -18,9 +21,10 @@ yh = y_lo + 4000./2**LEV*(0.5+np.arange(256*2**LEV))
 aseint = lambda x: np.trapz(np.trapz(x, x=xh, axis=1), x=yh)
 
 # INTERPOLATION POINTS
-kay_pt = (1506387.2409297135, 576740.1143521154)
-murphy_pt = (1498577.1203334671, 567251.6795597454)
-
+kay_pt = (-1506387.2409297135, -576740.1143521154)
+murphy_pt = (-1498577.1203334671, -567251.6795597454)
+cross_cl = np.loadtxt('/global/cscratch1/sd/skachuck/ismip6results/data/crosson_centerline.txt')
+pig_cl = np.loadtxt('/global/cscratch1/sd/skachuck/ismip6results/data/pig_centerline.txt')
 
 def update_progress(progress):
     barLength = 10 # Modify this to change the length of the progress bar
@@ -43,8 +47,10 @@ def update_progress(progress):
 
 def get_fnames(outpath, basename='plot', cut=-3, return_steps=False):
     # List of all output files, following basename
-    fnames = [i for i in os.listdir(outpath) if basename in i and not 'stats'
-    in i]
+    fnames = [i for i in os.listdir(outpath) 
+                if basename in i 
+                    and not 'stats' in i
+                    and not '__errorr__' in i]
     # Extract the timestep associated, for sorting
     steps = np.array([int(i.split('.')[cut]) for i in fnames])
     # Sort the fnames by timestep
@@ -119,6 +125,16 @@ def compute_load(thk, bas, rho_i=910, rho_w=1028, include_ocean=True, mask=None)
     else:
         return taf*rho_i
 
+def intersect_grounding_line(mask,centerline):
+    # Get the grounding line contour
+    pc = plt.contour(-xh, -yh, mask==1)
+    glx, gly = pc.allsegs[0][np.argmax([len(cont) for cont in pc.allsegs[0]])].T
+    plt.close()
+
+    xint, yint = intersection(glx, gly, centerline[0], centerline[1])
+
+    return np.array([xint, yint])
+
 def analyze_gia_run(outpath, Ao=362e9):
     fnames = get_fnames(outpath,)[1:]
 
@@ -179,16 +195,15 @@ def analyze_gia_run(outpath, Ao=362e9):
     mt_murph_upl = np.zeros_like(fnames, dtype=float)
 
     # Grounding line positions
-    # cross_cl = np.loadtxt()
-    # cross_gl = np.zeros_like(fnames, dtype=float)
-    # pig_cl = np.loadtxt()
-    # pig_gl = np.zeros_like(fnames, dtype=float)
+    cross_gl = np.zeros_like(fnames, dtype=float)
+    pig_gl = np.zeros_like(fnames, dtype=float)
 
     amrID = amrio.load(outpath+fnames[0])
     lo,hi = amrio.queryDomainCorners(amrID, LEV)
     xh,yh,bas = amrio.readBox2D(amrID, LEV, lo, hi, "Z_base", 0)
     xh,yh,bot = amrio.readBox2D(amrID, LEV, lo, hi, "Z_bottom", 0)    
     xh,yh,thk = amrio.readBox2D(amrID, LEV, lo, hi, "thickness", 0)    
+    xh,yh,mask = amrio.readBox2D(amrID, LEV, lo, hi, "mask", 0)    
 
     amrio.free(amrID)
     
@@ -197,6 +212,8 @@ def analyze_gia_run(outpath, Ao=362e9):
     freqy = np.fft.fftfreq(len(yh), dx)
     freqs = 2*np.pi*np.sqrt(freqx[None,:]**2 + freqy[:,None]**2).flatten()
     
+
+
     rheology = read_input_rheology(outpath)
     if rheology != {}:
         print(rheology)
@@ -228,6 +245,10 @@ def analyze_gia_run(outpath, Ao=362e9):
             load0 = compute_load(thk, bas)
             aig0 = aseint((thk>0)*(taf>=0))
 
+            cross_glpt0 = intersect_grounding_line(mask, cross_cl)
+            pig_glpt0 = intersect_grounding_line(mask, pig_cl)
+
+
         vafs[i] = aseint(taf)/Ao
         vbss[i] = aseint(-np.minimum(bas, 0))/Ao
         vfis[i] = aseint(thk*(taf==0))/Ao
@@ -248,10 +269,17 @@ def analyze_gia_run(outpath, Ao=362e9):
         #aics[i] = aseint((thk<=0))
 
 
-        kay_peak_thk[i]=float(thk_interp.ev(*kay_pt)
-        kay_peak_upl[i]=float(bas_interp.ev(*kay_pt)
-        mt_murph_thk[i]=float(thk_interp.ev(*murphy_pt)
-        mt_murph_upl[i]=float(bas_interp.ev(*murphy_pt)
+        kay_peak_thk[i]=float(thk_interp.ev(*kay_pt))
+        kay_peak_upl[i]=float(bas_interp.ev(*kay_pt))
+        mt_murph_thk[i]=float(thk_interp.ev(*murphy_pt))
+        mt_murph_upl[i]=float(bas_interp.ev(*murphy_pt))
+
+
+        cross_glpt = intersect_grounding_line(mask, cross_cl)
+        pig_glpt = intersect_grounding_line(mask, pig_cl)
+
+        cross_gl[i]=np.sum((cross_glpt-cross_glpt0)**2)
+        pig_gl[i]=np.sum((pig_glpt-pig_glpt0)**2)
         
         if rheology != {}:
             load = compute_load(thk, bas)
@@ -295,6 +323,9 @@ def analyze_gia_run(outpath, Ao=362e9):
     df['KayPeak_uplift'] = kay_peak_upl-kay_peak_upl[0]
     df['MtMurphy_thickness'] = mt_murph_thk
     df['MtMurphy_uplift'] = mt_murph_upl-mt_murph_upl[0]
+
+    df['CrossonGL_retreat'] = cross_gl
+    df['PIGGL_retreat'] = pig_gl
     
     df['MeanFrequency'] = mfqs
     df['MeanWavelength'] = mwvs
@@ -312,6 +343,8 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
+    print(args.rundir)
     df = analyze_gia_run(args.rundir)
-    if args.outname is None: args.outname = 'pandas_stats.csv'
-    df.to_csv(args.rundir+args.outname)
+    if args.outname is None: 
+        args.outname = args.rundir+'pandas_stats.csv'
+    df.to_csv(args.outname)
