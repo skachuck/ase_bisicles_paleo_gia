@@ -15,14 +15,21 @@ LEV = 3
 # SETUP
 x_lo = -1838250
 y_lo = -880250
-xh = x_lo + 4000./2**LEV*(0.5+np.arange(224*2**LEV))
-yh = y_lo + 4000./2**LEV*(0.5+np.arange(256*2**LEV))
+xh_map = x_lo + 4000./2**LEV*(0.5+np.arange(224*2**LEV))
+yh_map = y_lo + 4000./2**LEV*(0.5+np.arange(256*2**LEV))
 
-aseint = lambda x: np.trapz(np.trapz(x, x=xh, axis=1), x=yh)
+aseint = lambda x: np.trapz(np.trapz(x, x=xh_map, axis=1), x=yh_map)
 
 # INTERPOLATION POINTS
-kay_pt = (-1506387.2409297135, -576740.1143521154)
+# Kay Peak point is H1 from Balco et al 2022
+kay_pt = (-1508142.6608636277, -577725.4947202327)
+# Mt Murphy point is from the 
 murphy_pt = (-1498577.1203334671, -567251.6795597454)
+# Pine Island point is INMN from Barletta et al 2018
+pig_pt = (-1638679.764654042, -256024.40106907778)
+# Smith Point is TOMO from Barletta et al 2018
+smith_pt = (-1408863.203072522, -646872.950635499)
+
 cross_cl = np.loadtxt('/global/cscratch1/sd/skachuck/ismip6results/data/crosson_centerline.txt')
 pig_cl = np.loadtxt('/global/cscratch1/sd/skachuck/ismip6results/data/pig_centerline.txt')
 
@@ -127,7 +134,7 @@ def compute_load(thk, bas, rho_i=910, rho_w=1028, include_ocean=True, mask=None)
 
 def intersect_grounding_line(mask,centerline):
     # Get the grounding line contour
-    pc = plt.contour(-xh, -yh, mask==1)
+    pc = plt.contour(-xh_map, -yh_map, mask==1)
     glx, gly = pc.allsegs[0][np.argmax([len(cont) for cont in pc.allsegs[0]])].T
     plt.close()
 
@@ -193,6 +200,10 @@ def analyze_gia_run(outpath, Ao=362e9):
     kay_peak_upl = np.zeros_like(fnames, dtype=float)
     mt_murph_thk = np.zeros_like(fnames, dtype=float)
     mt_murph_upl = np.zeros_like(fnames, dtype=float)
+    pig_thk = np.zeros_like(fnames, dtype=float)
+    pig_upl = np.zeros_like(fnames, dtype=float)
+    smith_thk = np.zeros_like(fnames, dtype=float)
+    smith_upl = np.zeros_like(fnames, dtype=float)
 
     # Grounding line positions
     cross_gl = np.zeros_like(fnames, dtype=float)
@@ -236,8 +247,8 @@ def analyze_gia_run(outpath, Ao=362e9):
         ts[i] = amrio.queryTime(amrID)
         amrio.free(amrID)
 
-        bas_interp = RectBivariateSpline(xh, yh, bas.T)
-        thk_interp = RectBivariateSpline(xh, yh, thk.T)
+        bas_interp = RectBivariateSpline(xh_map, yh_map, bas.T)
+        thk_interp = RectBivariateSpline(xh_map, yh_map, thk.T)
         taf = np.maximum(thk + np.minimum(bas, 0)*rho_w/rho_i, 0)
         
         if i == 0:
@@ -273,7 +284,10 @@ def analyze_gia_run(outpath, Ao=362e9):
         kay_peak_upl[i]=float(bas_interp.ev(*kay_pt))
         mt_murph_thk[i]=float(thk_interp.ev(*murphy_pt))
         mt_murph_upl[i]=float(bas_interp.ev(*murphy_pt))
-
+        pig_thk[i]=float(thk_interp.ev(*pig_pt))
+        pig_upl[i]=float(bas_interp.ev(*pig_pt))
+        smith_thk[i]=float(thk_interp.ev(*smith_pt))
+        smith_upl[i]=float(bas_interp.ev(*smith_pt))
 
         cross_glpt = intersect_grounding_line(mask, cross_cl)
         pig_glpt = intersect_grounding_line(mask, pig_cl)
@@ -323,6 +337,10 @@ def analyze_gia_run(outpath, Ao=362e9):
     df['KayPeak_uplift'] = kay_peak_upl-kay_peak_upl[0]
     df['MtMurphy_thickness'] = mt_murph_thk
     df['MtMurphy_uplift'] = mt_murph_upl-mt_murph_upl[0]
+    df['PIG_thickness'] = pig_thk
+    df['PIG_uplift'] = pig_upl-pig_upl[0]
+    df['Smith_thickness'] = smith_thk
+    df['Smith_uplift'] = smith_upl-smith_upl[0]
 
     df['CrossonGL_retreat'] = cross_gl
     df['PIGGL_retreat'] = pig_gl
